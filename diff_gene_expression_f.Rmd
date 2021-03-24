@@ -1,0 +1,299 @@
+---
+title: "Differential Gene Expression"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+# Install required library
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("DESeq2")
+```
+
+# load librarys
+```{r}
+library(DESeq2)
+library(Biobase)
+
+```
+
+# load the featureCounts data from countTable dir.
+```{r}
+count_Data<- read.table("C:/Users/brost/Downloads/featureCounts.txt", head=T,row.names = 1)
+head(count_Data)
+```
+Lets clean our data by deleting the unwanted colunms
+```{r}
+# delete Column 1 -5
+count_Data<- count_Data[-c(1,2,3,4,5)]
+# print the first 6 lines
+head(count_Data)
+```
+
+Now, we need to restructure the columns names by deleting ".bam, .sam" from the dataframe
+```{r}
+colnames(count_Data) <-gsub("\\X.home.mlsi.RNASeq.mapping.","",colnames(count_Data)) 
+colnames(count_Data) <- gsub ("\\.UHR_[123].bam","",colnames(count_Data))
+colnames(count_Data) <- gsub ("\\.HBR_[123].bam","",colnames(count_Data))
+
+```
+Now, we need to work with matrix datasets. Therefore, we have to convert our dataframe(count_Data) to Matrix
+```{r}
+count_Data<-as.matrix(count_Data)
+
+#print first few lines
+head(count_Data)
+# confirm the class of count_Data
+class(count_Data)
+```
+
+Lets group our samples accordingly.thats UHR as cancer and HBR as normal
+```{r}
+group<- factor(c(rep("HBR",3), rep("UHR",3)))
+condn<- factor(c(rep("normal",3), rep("cancer",3)))
+```
+```{r}
+coldata<- data.frame(row.names = colnames(count_Data), group , condn)
+#print coldata
+coldata
+```
+Now, we can see that the column names of count_Data is now the row names of design dataset with each grouped accordingly.
+
+# The DESeqDataSet
+DESeqDatSet is an object class in R the combines data.frame with one or more matrix into an object.This data.frame has the metadata information of the samples and gene, the matrices which has the expression values.
+
+To create the DESeqDataSet, we need the following input parameters:
+
+countData:this contain a matrix of the actual values associated with the genes and samples which we already have with a variable name "count_Data".
+
+colData :a dataframe with all the variable we know about our samples.the row names should tally with the sample names.in our case, we have it  "coldata"
+
+design :This is our comparison and we are first using the condition colunm which is named as "condn" in our coldata dataframe.
+
+```{r}
+#Instantiating a DESeq dataset
+dds<- DESeqDataSetFromMatrix (countData =count_Data, colData = coldata, design= ~ condn)
+
+# a view into the counts
+head(counts(dds))
+
+# confirming our DESeqDataSets DEsign
+design(dds)
+```
+Lets do a check of how many reads where sequenced for each Sample
+```{r}
+colSums(counts(dds))
+```
+With our data ready, we can use DESeq2 function (estimateSizeFactors) for depth normalization.
+```{r}
+dds<-estimateSizeFactors(dds)
+sizeFactors(dds)
+```
+```{r}
+```
+
+# Pre-Filtering: we filter out all row sum that are less than 1
+```{r}
+ dds <- dds [rowSums(counts(dds)) > 1,]
+dim(dds)
+head(counts(dds))
+```
+# R log tRansformation
+we use the rlogTransformation function to scale our dds data for better clustering and Heatmap and to acertain the difference inour samples.
+```{r}
+rlog_Trans <-rlogTransformation(dds)
+head(assay(rlog_Trans))
+hist(assay(rlog_Trans),col = "coral")
+```
+The histogram dipict the distribution of our counts in a log-transform pattern.high genes with low frequency as seen in the histogram
+
+# Differential Expression Gene Analysis via DESeq2
+The package DESeq2 provides methods to test for differential expression by use of negative binomial generalized linear models; the estimates of dispersion and logarithmic fold changes incorporate data-driven prior distributions.
+```{r}
+# DESeq pipeline for the current condition
+dds_condn<-DESeq(dds)
+#confirmation of our factor setting and comparison i.e, cancer vs normal
+resultsNames(dds_condn)
+```
+# Defining colors for plots
+```{r}
+library(RColorBrewer)
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+
+```
+
+#Creating our result table
+```{r}
+resultForcondn<- results(dds_condn, contrast = c("condn", "normal", "cancer"))
+summary(resultForcondn)
+# to have a view of the metadata of columns in resultForcondn
+mcols(resultForcondn , use.names = T)
+```
+From the summary of[resultForcon],we can see the percentage of genes that are up and down-regulated between the two conditions.
+
+# Exploring and EXporting Results
+It is neccessary to expore our data. This analysis approach unvail points of interest, summary of main characteristics and patterns in or data.visualization techniques will be used for this approach. 
+#Shrinkage:for MA plots to shrink log2 foldchange by deleting noise(outliars)
+```{r}
+shrinkageForCondn <- lfcShrink(dds_condn , coef = ("condn_normal_vs_cancer"))
+# to minimise multiple visulization
+par(mfrow=c(2,2))
+
+plotMA(shrinkageForCondn,main='LFC Result plot for Condn',col.main='red')
+plotMA(resultForcondn, main='resultForcondn',col.main='red')
+plotMA(resultForcondn , ylim=c(-10,10))
+# to show a threshold setting
+abline(h=c(-1,1), col="red", lwd=2)
+```
+
+from the plot of 'resultForCodn', the top genes are the significantly  up-regulated, down, the down-regulated and the ones with black colors are the similer genes in one group.This shows that there is a difference in the samples.
+
+```{r}
+# to identify the row numbers of individual gene via clicking on the plot
+plotMA(shrinkageForCondn, ylim = c(-10 , 10))
+idx<- identify(shrinkageForCondn$baseMean , shrinkageForCondn$log2FoldChange)
+
+rownames(shrinkageForCondn)[idx]
+```
+
+
+```{r}
+rownames(shrinkageForCondn)[idx]
+
+```
+This are some of the genes that are highly significanly expressed from our plot
+```{r}
+plotCounts(dds_condn,gene="ZNF280A", intgroup="condn", xlab="condn",cex=0.8, pch=19, cex.lab=0.8, cex.sub=0.8, cex.axis=0.8, cex.main=1,col='red')
+```
+ To confirm this highly espresseds genes, we use one of the gene as dipicted in the plot and its obviously true that from the cancer group,ZNF280A is highly expressed
+#sample Distance HeatMap
+It is an important step in an RNA-seq analysis to assertain  overall similarity between samples: Which samples are similar to each other and which are different.
+```{r}
+#convert required log-transformed count data into a dist matrix
+sample_dist<- as.matrix(dist(t(assay(rlog_Trans))))
+if (!require("gplots")) {
+   install.packages("gplots", dependencies = TRUE)
+   library(gplots)
+   }
+library("gplots")
+heatmap.2(as.matrix(sample_dist), key=F, trace="none",Colv = c("cancer", "normal"),Rowv ="Colv",dendrogram= "none",col=colorpanel(100, "black", "grey"),margin=c(10, 10),ColSideColors = colors[condn],RowSideColors =colors [condn], main="Sample Distance Matrix")
+```
+
+#Principal Component Plot
+In PCA plot, the samples are projected onto the 2D plane in a way that they spread out in the two directions(x-axis and y-axis) that shows  most of the differences.PC1 shows most of the diffrences.
+```{r}
+plotPCA(rlog_Trans, intgroup ="condn")
+```
+From our plot, there is difference in samples of cancer group conpared to the samples in the normal group
+```{r}
+library(ggplot2)
+```
+
+```{r}
+pcaData <- plotPCA(rlog_Trans , intgroup=c("group", "condn"), returnData = T)
+percentVar<-round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, color = group, shape = condn))+
+geom_point(size =3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  coord_fixed() 
+```
+
+#Dispersion Plot And Volcano Plot
+```{r}
+par(mfrow=c(2,2))
+plotDispEsts(dds_condn, main = "Dispersion plot")
+
+# volcano plot
+ with(resultForcondn, plot(log2FoldChange, -log10(pvalue), pch=20, main="Volcano plot", xlim=c(-2.5,2)))
+  with(subset(resultForcondn, padj<.05 ), points(log2FoldChange, -log10(pvalue), pch=20, col="red"))
+```
+
+```{r}
+# to filter genes with significant padj of < .05
+table(resultForcondn$padj)< 0.05
+resultForcondn<-resultForcondn[order(resultForcondn$padj),]
+resultForcondn
+```
+log2 fold change (MLE): condn normal vs cancer 
+Wald test p-value: condn normal vs cancer 
+DataFrame with 889 rows and 6 columns
+            baseMean log2FoldChange     lfcSE       stat       pvalue         padj
+           <numeric>      <numeric> <numeric>  <numeric>    <numeric>    <numeric>
+ERCC-00004  1790.749       -2.47893 0.0612685   -40.4600  0.00000e+00  0.00000e+00
+ERCC-00130 13511.456       -2.15300 0.0431521   -49.8934  0.00000e+00  0.00000e+00
+SYNGR1       500.264        4.67625 0.1484937    31.4912 1.14473e-217 2.53749e-215
+SEPT3        476.738        4.56174 0.1495849    30.4960 2.94384e-204 4.89414e-202
+YWHAH        745.094        2.54745 0.0852049    29.8979 2.09233e-196 2.78281e-194
+...              ...            ...       ...        ...          ...          ...
+ERCC-00104  0.366988      0.4939326   3.43899  0.1436273     0.885795           NA
+ERCC-00137  0.446780     -2.0294698   3.15951 -0.6423379     0.520654           NA
+ERCC-00138  0.382538      0.4939331   3.39124  0.1456499     0.884198           NA
+ERCC-00158  0.821778     -0.0823638   2.15292 -0.0382569     0.969483           NA
+ERCC-00168  0.972073      2.4153877   2.06863  1.1676246     0.242958           NA
+
+#Volcano Plot
+```{r}
+with(resultForcondn, plot(log2FoldChange, -log10(pvalue),pch=20, main="volcano Plot",col.main="blue", xlim= c(-2.5,2)))
+with(subset(resultForcondn, padj < 0.5), points(log2FoldChange,log10(pvalue), pch=20, col='red'))
+```
+From the volcano plot, we see an overview of how many genes are up-regulated and down-regulated in cancer vs normal.at point 0, depict gene which do not change.
+# Heatmap of Count matrix
+Version 1: Heatmap of Normalized dds counts
+```{r}
+if (!require("pheatmap")) {
+   install.packages("pheatmap", dependencies = TRUE)
+}
+   library(pheatmap)
+select <- order(rowMeans(counts(dds,normalized=T)),decreasing=T) [1:80]
+nt <- normTransform(dds) # defaults to log2(x+1)
+log2.norm.counts <- assay(nt)[select,]
+df <- as.data.frame(colData(dds)[,c("group","condn")])
+
+pheatmap(log2.norm.counts, cluster_rows=F, show_rownames=T,
+cluster_cols=F, annotation_col=df, fontsize_row = 5, main = "HeatMap of Normalized dds counts", col.main="blue")
+```
+The light blue color depict very low expressed gene,Blue, high Expressed uptil red for the higly expressed gene of 80 samples as shown in the code
+#Version 2: Heatmap of regularised log Trandform dds counts
+```{r}
+df <- as.data.frame(colData(rlog_Trans)[,c("condn","group")])
+pheatmap(assay(rlog_Trans)[select,], cluster_rows=T, show_rownames=T,
+cluster_cols=T, annotation_col=df, fontsize_row =7,main="HeatMap of regularised logTransform dds counts")
+```
+In this version of Heatmap,we can see that samples of HBR and UHR are quiet similar to each other as shown in the clustering.
+# Heatmap of result Tables:
+```{r}
+#merge result of statistically differentially analysed genes with counts of dds
+res_data <- merge(as.data.frame(resultForcondn), as.data.frame(counts(dds_condn, normalized=T)), by="row.names", sort=F)
+# assign 'Gene' to the first column of the dataframe
+names(res_data)[1] <- "Gene"
+head(res_data)
+```
+
+```{r}
+library(pheatmap)
+resSignal<- res_data[which(res_data$padj <0.1),]
+resSignal<- resSignal[order(resSignal$log2FoldChange),]
+diffInGenes<- resSignal
+head(diffInGenes)
+z<-(as.data.frame(diffInGenes, row.names = diffInGenes$Genes))
+z<-(subset(z,select=c("UHR_1","UHR_2","UHR_3","HBR_1","HBR_2","HBR_3")))
+deRNAscale<- t(z)
+deRNAscale<-scale(deRNAscale)
+deRNAscale<- t(deRNAscale)
+head(deRNAscale)
+dim(deRNAscale)
+
+RNA<- head(deRNAscale, n= 50L)
+df<- as.data.frame(colData(rlog_Trans)[,c("condn")])
+pheatmap(RNA,fontsize = 5, main= "De GENE",margins=c(6,12),cexRow=1,cluster_cols=T, show_rownames=T,show_colnames=T, cluster_rows=F)
+```
+In this heatmap,are genes wich are differentially expressed with padj <0.1. it depict 50 genes with UHR up regulated and HBR down regulated.
+
+```{r}
+```
+
